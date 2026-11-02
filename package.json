@@ -1,0 +1,39 @@
+{
+  "name": "cysoc-portal",
+  "version": "1.0.1",
+  "private": true,
+  "description": "CySOC multi-tenant customer portal: escalations, dashboards, SLA scorecard, requests, reports, contacts, audit and administration.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "npm run build:server && npm run build:web",
+    "build:server": "node scripts/build-server.mjs",
+    "build:web": "node scripts/build-web.mjs",
+    "start": "node dist/server/src/index.js",
+    "worker": "node dist/server/src/worker.js",
+    "migrate": "node dist/server/src/scripts/migrate.js",
+    "create-admin": "node dist/server/src/scripts/create-admin.js",
+    "seed-demo": "node dist/server/src/scripts/seed-demo.js",
+    "dev": "tsx server/src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --import tsx --test-concurrency=1 test/api.test.ts",
+    "test:integrations": "node --test --import tsx --test-concurrency=1 test/integrations.test.ts",
+    "test:e2e": "node test/e2e.mjs"
+  },
+  "dependencies": {
+    "pg": "8.13.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "@types/pg": "8.11.10",
+    "@types/react": "19.0.2",
+    "@types/react-dom": "19.0.2",
+    "esbuild": "0.24.2",
+    "tsx": "4.19.2",
+    "typescript": "5.7.2"
+  }
+}
