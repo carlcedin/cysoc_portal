@@ -50,6 +50,17 @@ Every minute (`WORKER_INTERVAL_SECONDS`) the worker:
 
 Freshservice limits API calls per minute by plan. One poll uses one call per 100 updated tickets, plus one call per queued change. If you see HTTP 429 in the status note, raise `WORKER_INTERVAL_SECONDS`.
 
+## Grafana on the same server
+
+`grafana/docker-compose.yml` runs Grafana OSS next to the portal and joins the portal's Docker network, so the portal reaches it as `http://grafana:3000` (plain http is accepted only for such same-server container names). Start the portal first, then:
+
+```bash
+cd grafana && sudo cp .env.example .env && sudo nano .env      # set GRAFANA_ADMIN_PASSWORD
+sudo docker compose up -d
+```
+
+Use one Grafana **organisation per tenant** so each tenant's data sources and token stay separate: in each organisation add the tenant's data source, then a service account with the Viewer role and a token. In the portal, each tenant's Grafana connection uses endpoint `http://grafana:3000` and that organisation's token.
+
 ## Grafana (one connection per tenant)
 
 A connection named `Grafana · <tenant>` is created with each tenant.

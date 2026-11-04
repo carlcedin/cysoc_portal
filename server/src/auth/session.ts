@@ -79,8 +79,14 @@ route('POST', '/api/auth/login', async (req) => {
     if (!verifyPassword(password, u.password_hash)) return { error: await recordFailure(tx, u, req.ip, 'Wrong password') ?? generic };
     await tx.query('UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = $1', [u.id]);
     const token = randomToken();
-    await tx.query(`INSERT INTO sessions (id_hash, user_id, expires_at, ip, user_agent) VALUES ($1, $2, now() + ($3 || ' hours')::interval, $4, $5)`,
-      [sha256(token), u.id, String(config.sessionMaxHours), req.ip, String(req.raw.headers['user-agent'] || '').slice(0, 300)]);
+    const skipMfa = !config.mfaRequired;
+    await tx.query(`INSERT INTO sessions (id_hash, user_id, expires_at, ip, user_agent, mfa_passed) VALUES ($1, $2, now() + ($3 || ' hours')::interval, $4, $5, $6)`,
+      [sha256(token), u.id, String(config.sessionMaxHours), req.ip, String(req.raw.headers['user-agent'] || '').slice(0, 300), skipMfa]);
+    if (skipMfa) {
+      await tx.query('UPDATE users SET last_login_at = now() WHERE id = $1', [u.id]);
+      await audit(tx, { userId: u.id, name: u.name, side: u.role === 'customer' ? 'Customer' : 'CySOC', ip: req.ip }, 'Signed in', 'Password only: MFA is turned off on this server', u.tenant_id);
+      return { token, stage: u.must_change_password ? 'change_password' : 'ready' };
+    }
     return { token, stage: u.mfa_enabled ? 'mfa' : 'mfa_setup' };
   });
   if ('error' in result) throw result.error;
@@ -119,9 +125,13 @@ route('POST', '/api/auth/mfa/verify', async (req) => {
     if (!u?.mfa_secret_enc) return { error: badRequest('Set up your authenticator first.') };
     if (u.locked_until && new Date(u.locked_until) > new Date()) return { error: LOCKED };
     const step = verifyTotp(decrypt(u.mfa_secret_enc), clean);
-    if (step === null || (u.mfa_last_step && step <= Number(u.mfa_last_step))) {
+    if (step !== null && u.mfa_last_step && step <= Number(u.mfa_last_step)) {
+      // A correct code that was already used: not counted as a failed attempt.
+      return { error: new HttpError(401, 'That code was already used. Wait for the next code in your authenticator app, then enter it.', 'code_reused') };
+    }
+    if (step === null) {
       const locked = await recordFailure(tx, u, req.ip, 'Wrong MFA code');
-      return { error: locked ?? new HttpError(401, 'That code did not work. Check the time on your phone and enter the current 6-digit code.', 'bad_code') };
+      return { error: locked ?? new HttpError(401, 'That code did not work. Check that your phone sets its time automatically, then enter the current 6-digit code.', 'bad_code') };
     }
     const actor: Actor = { userId: u.id, name: u.name, side: u.role === 'customer' ? 'Customer' : 'CySOC', ip: req.ip };
     await tx.query('UPDATE users SET mfa_enabled = true, mfa_last_step = $2, last_login_at = now(), failed_logins = 0 WHERE id = $1', [u.id, step]);

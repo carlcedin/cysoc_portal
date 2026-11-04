@@ -15,6 +15,7 @@ const server = createServer(attachSession);
 server.requestTimeout = 120_000;
 server.headersTimeout = 30_000;
 server.listen(config.port, config.host, () => {
+  if (!config.mfaRequired) console.warn('[portal] WARNING: MFA_REQUIRED=false. Accounts sign in with a password only.');
   console.log(`[portal] listening on ${config.host}:${config.port} (${config.integrationMode} mode, public URL ${config.publicUrl})`);
 });
 

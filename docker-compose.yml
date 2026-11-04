@@ -4,7 +4,7 @@ name: cysoc-portal
 
 x-app: &app
   build: .
-  image: cysoc-portal:1.0.1
+  image: cysoc-portal:1.0.3
   env_file: .env
   environment:
     DATABASE_URL: postgres://portal_app:${PORTAL_APP_PASSWORD}@db:5432/cysoc_portal
@@ -16,7 +16,8 @@ x-app: &app
   security_opt: [no-new-privileges:true]
   cap_drop: [ALL]
   restart: unless-stopped
-  networks: [backend]
+  # backend reaches the database; frontend gives outbound access to NTS, Grafana, email and SMS.
+  networks: [backend, frontend]
 
 services:
   db:
@@ -63,8 +64,10 @@ services:
   nginx:
     image: nginx:1.27-alpine
     ports:
-      - "443:443"
-      - "80:80"
+      # Change PORTAL_HTTPS_PORT in .env when 443 is taken (for example by MISP); PUBLIC_URL must then include it.
+      - "${PORTAL_HTTPS_PORT:-443}:443"
+      # Redirect from http:// only works on the default port; remove this line if 80 is used by another service.
+      - "${PORTAL_HTTP_PORT:-80}:80"
     volumes:
       - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./docker/certs:/etc/nginx/certs:ro

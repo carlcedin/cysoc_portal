@@ -36,6 +36,8 @@ export const config = {
   workerIntervalSeconds: num('WORKER_INTERVAL_SECONDS', 60),
   webDir: env('WEB_DIR', './dist/web'),
   trustProxy: bool('TRUST_PROXY', true),
+  // Authenticator-app MFA for every account. Turn off only for testing before customers have access.
+  mfaRequired: bool('MFA_REQUIRED', true),
 };
 
 export function masterKeyBytes(): Buffer {

@@ -29,7 +29,13 @@ export async function callJson(url: string, init: RequestInit & { timeoutMs?: nu
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), init.timeoutMs ?? 15000);
   try {
-    const res = await fetch(url, { ...init, signal: ctrl.signal });
+    let res: Response;
+    try { res = await fetch(url, { ...init, signal: ctrl.signal }); }
+    catch (e: any) {
+      // Name the network cause (DNS, refused, timeout, TLS) instead of a bare "fetch failed".
+      const cause = e?.name === 'AbortError' ? 'timed out' : (e?.cause?.code || e?.cause?.message || e?.message || 'network error');
+      throw new Error(`Cannot reach ${new URL(url).host}: ${cause}`);
+    }
     const text = await res.text();
     if (!res.ok) {
       const retryAfter = Number(res.headers.get('retry-after') || 0);

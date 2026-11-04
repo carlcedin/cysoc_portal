@@ -104,6 +104,9 @@ test('a TOTP code cannot be replayed', async () => {
   await c.call('POST', '/api/auth/login', { email: 'aisyah@seri.example', password: DEMO_PW });
   const r = await c.call('POST', '/api/auth/mfa/verify', { code: totpAt(seriSecret, Number(u.mfa_last_step)) });
   assert.equal(r.status, 401);
+  assert.equal(r.data.code, 'code_reused', 'reused code gets its own message');
+  const [f] = await sys("SELECT failed_logins FROM users WHERE email = 'aisyah@seri.example'");
+  assert.equal(f.failed_logins, 0, 'a reused code does not count towards lockout');
   assert.equal((await c.call('GET', '/api/escalations')).status, 401);
 });
 

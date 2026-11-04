@@ -1,0 +1,39 @@
+# Grafana for the CySOC portal, on the same VM as the portal.
+# It joins the portal's Docker network, so the portal reaches it as http://grafana:3000
+# and dashboard queries never leave the server.
+# Start the portal first (it creates the network), then: cd grafana && sudo docker compose up -d
+name: cysoc-grafana
+
+services:
+  grafana:
+    image: grafana/grafana-oss:11.3.1
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in grafana/.env}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_USERS_ALLOW_ORG_CREATE: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_SECURITY_COOKIE_SECURE: "false"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    ports:
+      # Grafana's web UI for CySOC staff to build dashboards. Docker bypasses ufw, so restrict
+      # port 3000 to staff networks at your network firewall, or change to "127.0.0.1:3000:3000"
+      # and reach it through an SSH tunnel.
+      - "${GRAFANA_PORT:-3000}:3000"
+    networks: [default, portal]
+    security_opt: [no-new-privileges:true]
+
+volumes:
+  grafana-data:
+
+networks:
+  portal:
+    external: true
+    name: cysoc-portal_frontend

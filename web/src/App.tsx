@@ -20,6 +20,7 @@ export interface Meta {
   requestTypes: Record<string, number>;
   reportTypes: string[];
   integrationMode: 'live' | 'demo';
+  mfaRequired: boolean;
 }
 export interface ViewProps { meta: Meta; scope: string; setScope: (s: string) => void; can: (p: string) => boolean; }
 
@@ -148,6 +149,7 @@ function Portal({ meta, signOut }: { meta: Meta; signOut: () => void }) {
       <button className="signout" id="signout" onClick={signOut}>Sign out</button>
     </div>} />
     <div className="wrap">
+      {!meta.mfaRequired && staff && <div className="stale" role="alert"><div><b>MFA is turned off.</b> Accounts sign in with a password only. Set MFA_REQUIRED=true in .env before customers get access.</div></div>}
       {meta.integrationMode === 'demo' && <div className="banner">Demo mode: dashboards show generated sample data and no email, SMS or NTS calls are made.</div>}
       <div className="scope"><h2 id="scopeTitle">{scopeName}</h2><span className="meta">{tenant ? `${tenant.service} · ${tenant.siem}` : staff ? `${meta.tenants.length} tenants` : ''}</span></div>
       <nav className="tabs" id="tabs" role="tablist" aria-label="Portal sections">

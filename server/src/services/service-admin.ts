@@ -18,7 +18,7 @@ route('GET', '/api/meta', async (req) => withCtx(req.ctx, async tx => ({
   user: { id: req.user.id, name: req.user.name, email: req.user.email, role: req.user.role, tenantId: req.user.tenantId, tenantName: req.user.tenantName },
   permissions: (Object.keys(PERMISSIONS) as Permission[]).filter(p => can(req.user.role, p)),
   tenants: await tx.query('SELECT id, code, name, service, siem FROM tenants WHERE active ORDER BY name'),
-  sla: await slaTargets(tx), requestTypes: REQUEST_TYPES, reportTypes: REPORT_TYPES, integrationMode: config.integrationMode,
+  sla: await slaTargets(tx), requestTypes: REQUEST_TYPES, reportTypes: REPORT_TYPES, integrationMode: config.integrationMode, mfaRequired: config.mfaRequired,
 })));
 
 // ---------- Service and contacts ----------
@@ -148,7 +148,10 @@ route('PUT', '/api/admin/integrations/:id', async (req) => {
     const changed: string[] = [];
     if (b.endpoint !== undefined) {
       const ep = str(b.endpoint, 'an endpoint URL', 500);
-      if (!/^(https:\/\/|smtp:\/\/|http:\/\/localhost|http:\/\/127\.0\.0\.1)\S+$/.test(ep)) throw badRequest('Enter an https:// (or smtp:// for email) endpoint URL.');
+      // https everywhere; plain http only for a container on the same Docker network (a name without dots, e.g. http://grafana:3000).
+      const internalHttp = /^http:\/\/[a-z0-9][a-z0-9_-]*(:\d{1,5})?(\/\S*)?$/i.test(ep);
+      if (!/^(https:\/\/|smtp:\/\/)\S+$/.test(ep) && !internalHttp) throw badRequest('Enter an https:// address (smtp:// for email). Plain http:// is allowed only for a container on the same server, such as http://grafana:3000.');
+      if (i.id === 'nts' && /\/api\/v2\/?$/.test(ep)) throw badRequest('Enter the Freshservice address without /api/v2, for example https://yourcompany.freshservice.com');
       if (ep !== i.endpoint) { await tx.query('UPDATE integrations SET endpoint = $2 WHERE id = $1', [i.id, ep]); changed.push('endpoint'); }
     }
     if (typeof b.secret === 'string' && b.secret.length) {

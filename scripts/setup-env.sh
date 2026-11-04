@@ -3,6 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 URL="${1:-}"; MODE="${2:-live}"
+if [[ ! -f .env.example ]]; then echo ".env.example is missing. Unpack the package with: sudo unzip -o cysoc-portal-<version>.zip -d /opt"; exit 1; fi
 if [[ ! "$URL" =~ ^https://[^/]+$ ]]; then
   echo "Give the portal address exactly as users will type it, with https:// and no trailing slash."
   echo "Example: ./scripts/setup-env.sh https://cysoc-portal.time.com.my"
@@ -17,7 +18,8 @@ sed -e "s#^PUBLIC_URL=.*#PUBLIC_URL=${URL}#" \
     -e "s#^PORTAL_APP_PASSWORD=.*#PORTAL_APP_PASSWORD=$(openssl rand -hex 24)#" \
     -e "s#^MASTER_KEY=.*#MASTER_KEY=$(openssl rand -base64 32)#" \
     -e "s#^INTEGRATION_MODE=.*#INTEGRATION_MODE=${MODE}#" \
-    .env.example > .env
+    .env.example > .env.tmp
+mv .env.tmp .env
 chmod 600 .env
 echo "Created .env for ${URL} (${MODE} mode). Copy the MASTER_KEY line into your password vault now:"
 grep '^MASTER_KEY=' .env
