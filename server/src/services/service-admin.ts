@@ -10,6 +10,7 @@ import { testNts, DEFAULT_NTS_SETTINGS } from '../integrations/nts.js';
 import { testGrafana } from '../integrations/grafana.js';
 import { testNotify } from '../integrations/notify.js';
 import { config } from '../config.js';
+import { CATEGORIES, CATEGORY_CODES } from './categories.js';
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -17,7 +18,8 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 route('GET', '/api/meta', async (req) => withCtx(req.ctx, async tx => ({
   user: { id: req.user.id, name: req.user.name, email: req.user.email, role: req.user.role, tenantId: req.user.tenantId, tenantName: req.user.tenantName },
   permissions: (Object.keys(PERMISSIONS) as Permission[]).filter(p => can(req.user.role, p)),
-  tenants: await tx.query('SELECT id, code, name, service, siem FROM tenants WHERE active ORDER BY name'),
+  tenants: await tx.query('SELECT id, code, name, service, siem, categories FROM tenants WHERE active ORDER BY name'),
+  categories: CATEGORIES,
   sla: await slaTargets(tx), requestTypes: REQUEST_TYPES, reportTypes: REPORT_TYPES, integrationMode: config.integrationMode, mfaRequired: config.mfaRequired,
 })));
 
@@ -27,12 +29,12 @@ route('GET', '/api/service', async (req) => {
   return withCtx(req.ctx, async tx => {
     if (!t) {
       return { overview: await tx.query(`
-        SELECT t.id, t.name, t.services, t.licensed_eps, t.licensed_assets, t.renewal_date, t.contacts_confirmed_at,
+        SELECT t.id, t.name, t.services, t.categories, t.licensed_eps, t.licensed_assets, t.renewal_date, t.contacts_confirmed_at,
                (SELECT count(*)::int FROM log_source_contracts c WHERE c.tenant_id = t.id) AS contracted,
                (SELECT count(*)::int FROM log_source_contracts c WHERE c.tenant_id = t.id AND c.onboarded) AS onboarded
         FROM tenants t WHERE t.active ORDER BY t.name`) };
     }
-    const tenant = await tx.one('SELECT id, code, name, service, siem, licensed_eps, licensed_assets, services, monitoring_hours, renewal_date, contacts_confirmed_at FROM tenants WHERE id = $1', [t]);
+    const tenant = await tx.one('SELECT id, code, name, service, siem, licensed_eps, licensed_assets, services, categories, monitoring_hours, renewal_date, contacts_confirmed_at FROM tenants WHERE id = $1', [t]);
     if (!tenant) throw notFound();
     return {
       tenant,
@@ -291,19 +293,23 @@ async function saveTenant(req: any, id: string | null) {
   const intOrNull = (v: any, n: string) => { if (v === null || v === '' || v === undefined) return null; const x = Number(v); if (!Number.isInteger(x) || x < 0) throw badRequest(`${n} must be a whole number.`); return x; };
   const eps = intOrNull(b.licensedEps, 'Licensed EPS'), assets = intOrNull(b.licensedAssets, 'Licensed assets');
   const services: string[] = Array.isArray(b.services) ? b.services.map((s: unknown) => str(s, 'a service name', 120)).slice(0, 20) : [];
+  const categories: string[] = Array.isArray(b.categories) ? [...new Set<string>(b.categories.map((c: unknown) => String(c)))] : [];
+  const badCat = categories.find(c => !CATEGORY_CODES.includes(c));
+  if (badCat) throw badRequest(`Unknown customer category ${badCat}.`);
+  if (!categories.length) throw badRequest('Choose at least one customer category.');
   const renewal = b.renewalDate ? String(b.renewalDate) : null;
   if (renewal && !/^\d{4}-\d{2}-\d{2}$/.test(renewal)) throw badRequest('Use YYYY-MM-DD for the renewal date.');
   const sources: { name: string; onboarded: boolean }[] = Array.isArray(b.logSources) ? b.logSources.slice(0, 200).map((s: any) => ({ name: str(s.name, 'a log source name', 160), onboarded: !!s.onboarded })) : [];
   return withCtx(req.ctx, async tx => {
     let tid = id;
     if (id) {
-      const r = await tx.one(`UPDATE tenants SET code=$2, name=$3, service=$4, siem=$5, licensed_eps=$6, licensed_assets=$7, services=$8, renewal_date=$9, monitoring_hours=$10, active=$11 WHERE id=$1 RETURNING id`,
-        [id, code, name, service, siem, eps, assets, services, renewal, str(b.monitoringHours ?? '24x7', 'monitoring hours', 60), b.active !== false]);
+      const r = await tx.one(`UPDATE tenants SET code=$2, name=$3, service=$4, siem=$5, licensed_eps=$6, licensed_assets=$7, services=$8, renewal_date=$9, monitoring_hours=$10, active=$11, categories=$12 WHERE id=$1 RETURNING id`,
+        [id, code, name, service, siem, eps, assets, services, renewal, str(b.monitoringHours ?? '24x7', 'monitoring hours', 60), b.active !== false, categories]);
       if (!r) throw notFound();
     } else {
       if (await tx.one('SELECT 1 FROM tenants WHERE code = $1', [code])) throw new HttpError(409, 'A tenant with this code already exists.', 'exists');
-      const [r] = await tx.query(`INSERT INTO tenants (code, name, service, siem, licensed_eps, licensed_assets, services, renewal_date, monitoring_hours) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-        [code, name, service, siem, eps, assets, services, renewal, str(b.monitoringHours ?? '24x7', 'monitoring hours', 60)]);
+      const [r] = await tx.query(`INSERT INTO tenants (code, name, service, siem, licensed_eps, licensed_assets, services, renewal_date, monitoring_hours, categories) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+        [code, name, service, siem, eps, assets, services, renewal, str(b.monitoringHours ?? '24x7', 'monitoring hours', 60), categories]);
       tid = r.id;
       await tx.query(`INSERT INTO integrations (id, kind, name, tenant_id, auth_label, settings) VALUES ($1, 'dashboard', $2, $3, 'Service account token (Viewer)', '{"panels":{}}') ON CONFLICT (id) DO NOTHING`, [`grafana:${code}`, `Grafana · ${name}`, tid]);
     }

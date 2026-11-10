@@ -92,6 +92,8 @@ const ctx = (vp = { width: 1280, height: 900 }) => browser.newContext({ viewport
   await signIn(p, 'analyst@cysoc.example');
   const tabs = await p.$$eval('#tabs .tab', x => x.map(y => y.id.replace('tab-', '')));
   check('analyst sees health and administration', tabs.includes('health') && tabs.includes('admin'));
+  check('staff land on the Customers page', !!(await p.$('#catSel')));
+  await p.screenshot({ path: `${SHOTS}/analyst-landing.png`, fullPage: true });
   await tour(p, 'analyst', tabs);
   await p.click('#tab-admin'); await p.waitForTimeout(500);
   const txt = await p.textContent('.view');
@@ -101,9 +103,28 @@ const ctx = (vp = { width: 1280, height: 900 }) => browser.newContext({ viewport
   await p.click('#tab-escalations'); await p.click('#chip-triage'); await p.waitForTimeout(300);
   const row = await p.$('tr[data-ref]');
   if (row) { await row.click(); await p.waitForSelector('#b-esc'); await p.click('#b-esc'); await p.waitForTimeout(800); check('analyst escalated a triage item', /Escalated/.test(await p.textContent('.view'))); }
-  // Focus a tenant from the overview
-  await p.selectOption('#scopeSel', { label: 'Bayu Logistics' }); await p.waitForTimeout(500);
-  check('tenant selector focuses one tenant', (await p.textContent('#scopeTitle')) === 'Bayu Logistics');
+  // Category -> customer -> workspace
+  await p.click('#tab-customers'); await p.waitForSelector('#catSel');
+  await p.selectOption('#catSel', 'DDoS'); await p.waitForTimeout(500);
+  const ddos = await p.$$eval('tr[data-cust]', r => r.map(x => x.getAttribute('data-cust')).sort());
+  check('DDoS category lists its customers only', JSON.stringify(ddos) === JSON.stringify(['bayu', 'cahaya', 'permata']), ddos.join(','));
+  await p.click('tr[data-cust="bayu"]'); await p.waitForSelector('#backToCustomers');
+  check('clicking a customer opens its workspace', (await p.textContent('#scopeTitle')) === 'Bayu Logistics');
+  const wsTabs = await p.$$eval('#tabs .tab', x => x.map(y => y.id.replace('tab-', '')));
+  check('workspace has customer tabs only', !wsTabs.includes('customers') && !wsTabs.includes('admin') && wsTabs.includes('dashboard'), wsTabs.join(','));
+  for (const t of wsTabs) {
+    await p.click('#tab-' + t); await p.waitForTimeout(400);
+    await p.waitForFunction(() => !document.querySelector('.view .loading'), null, { timeout: 10000 }).catch(() => {});
+    const err = await p.$('.view .err-box');
+    check(`workspace ${t} loads`, !err, err ? await err.textContent() : '');
+    await p.screenshot({ path: `${SHOTS}/workspace-${t}.png`, fullPage: true });
+  }
+  const regs = await p.$$eval('tr[data-ref]', r => r.length);
+  await p.click('#tab-escalations'); await p.waitForTimeout(400);
+  await p.selectOption('#custSwitch', { label: 'Cahaya University' }); await p.waitForTimeout(500);
+  check('switch customer within the category', (await p.textContent('#scopeTitle')) === 'Cahaya University');
+  await p.click('#backToCustomers'); await p.waitForSelector('#catSel');
+  check('back returns to the DDoS list', (await p.$eval('#catSel', s => s.value)) === 'DDoS');
   await c.close();
 }
 

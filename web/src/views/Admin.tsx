@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { api } from '../api';
 import { useApi, Panel, Pill, Table, Loading, ErrorBox, Chips, Msg, useAction, fmt, Sev } from '../ui';
 import type { ViewProps } from '../App';
+import { CatPills } from './Customers';
 
 const IST: Record<string, [string, string]> = { ok: ['p-closed', 'Connected'], warn: ['p-rem', 'Attention'], error: ['p-esc', 'Error'], unknown: ['p-off', 'Not tested'] };
 const permCell = (v: string) => <Pill c={v === 'No' || v === 'No access' ? 'p-off' : ['Yes', 'Edit', 'Manage'].includes(v) ? 'p-closed' : 'p-ack'}>{v}</Pill>;
@@ -12,7 +13,7 @@ export function Admin({ meta, can }: ViewProps) {
     {!full && <div className="stale"><div><b>View only.</b> API configuration and user accounts can only be changed by a Full Admin account.</div></div>}
     <Integrations full={full} />
     {can('manageUsers') && <Users meta={meta} />}
-    {can('manageTenants') && <Tenants />}
+    {can('manageTenants') && <Tenants meta={meta} />}
     {can('editSla') && <Sla meta={meta} />}
     <Permissions />
   </>;
@@ -108,23 +109,23 @@ function Users({ meta }: { meta: ViewProps['meta'] }) {
 }
 
 const parseSources = (text: string) => text.split('\n').map(l => l.trim()).filter(Boolean).map(l => ({ name: l.replace(/\s*\(pending\)\s*$/i, ''), onboarded: !/\(pending\)\s*$/i.test(l) }));
-function Tenants() {
+function Tenants({ meta }: { meta: ViewProps['meta'] }) {
   const { data, error, loading, reload } = useApi<any>('/api/admin/tenants');
   const { msg, busy, run } = useAction();
-  const blank = { id: '', code: '', name: '', service: 'TSAM', siem: 'QRadar', licensedEps: '', licensedAssets: '', services: '', renewalDate: '', sources: '' };
+  const blank = { id: '', code: '', name: '', service: 'TSAM', siem: 'QRadar', licensedEps: '', licensedAssets: '', services: '', renewalDate: '', sources: '', categories: [] as string[] };
   const [f, setF] = useState<typeof blank | null>(null);
   if (error) return <ErrorBox msg={error} />;
   if (loading && !data) return <Loading />;
-  const open = (t?: any) => setF(t ? { id: t.id, code: t.code, name: t.name, service: t.service, siem: t.siem, licensedEps: t.licensed_eps ?? '', licensedAssets: t.licensed_assets ?? '', services: t.services.join('\n'), renewalDate: t.renewal_date ? String(t.renewal_date).slice(0, 10) : '', sources: t.log_sources.map((s: any) => s.name + (s.onboarded ? '' : ' (pending)')).join('\n') } : blank);
+  const open = (t?: any) => setF(t ? { id: t.id, code: t.code, name: t.name, service: t.service, siem: t.siem, licensedEps: t.licensed_eps ?? '', licensedAssets: t.licensed_assets ?? '', services: t.services.join('\n'), renewalDate: t.renewal_date ? String(t.renewal_date).slice(0, 10) : '', categories: t.categories ?? [], sources: t.log_sources.map((s: any) => s.name + (s.onboarded ? '' : ' (pending)')).join('\n') } : blank);
   const save = (e: React.FormEvent) => {
     e.preventDefault(); if (!f) return;
-    const body = { code: f.code, name: f.name, service: f.service, siem: f.siem, licensedEps: f.licensedEps, licensedAssets: f.licensedAssets, services: f.services.split('\n').map(s => s.trim()).filter(Boolean), renewalDate: f.renewalDate, logSources: parseSources(f.sources) };
+    const body = { code: f.code, name: f.name, service: f.service, siem: f.siem, licensedEps: f.licensedEps, licensedAssets: f.licensedAssets, services: f.services.split('\n').map(s => s.trim()).filter(Boolean), renewalDate: f.renewalDate, categories: f.categories, logSources: parseSources(f.sources) };
     run(() => api(f.id ? 'PUT' : 'POST', f.id ? `/api/admin/tenants/${f.id}` : '/api/admin/tenants', body), `${f.name} saved.${f.id ? '' : ' Add its Grafana connection under API configuration. Sign out and in again to see it in tenant lists.'}`, () => { setF(null); reload(); });
   };
   const set = (k: string) => (e: React.ChangeEvent<any>) => setF({ ...f!, [k]: e.target.value });
   return <Panel title="Tenants" right={<button className="btn sm" onClick={() => open()} id="tnNew">Add tenant</button>}>
-    <Table head={<><th>Tenant</th><th>Code (NTS)</th><th>Service</th><th>Licence</th><th>Renewal</th><th></th></>}>
-      {data.items.map((t: any) => <tr key={t.id}><td><b>{t.name}</b></td><td className="mono">{t.code}</td><td>{t.service} · {t.siem}</td><td>{t.licensed_eps ? `${t.licensed_eps} EPS` : t.licensed_assets ? `${t.licensed_assets} assets` : '—'}</td><td>{t.renewal_date ? String(t.renewal_date).slice(0, 10) : '—'}</td><td><button className="btn sm ghost" onClick={() => open(t)}>Edit</button></td></tr>)}
+    <Table head={<><th>Tenant</th><th>Code (NTS)</th><th>Categories</th><th>Service</th><th>Licence</th><th>Renewal</th><th></th></>}>
+      {data.items.map((t: any) => <tr key={t.id}><td><b>{t.name}</b></td><td className="mono">{t.code}</td><td className="wrap-t"><CatPills cats={t.categories ?? []} /></td><td>{t.service} · {t.siem}</td><td>{t.licensed_eps ? `${t.licensed_eps} EPS` : t.licensed_assets ? `${t.licensed_assets} assets` : '—'}</td><td>{t.renewal_date ? String(t.renewal_date).slice(0, 10) : '—'}</td><td><button className="btn sm ghost" onClick={() => open(t)}>Edit</button></td></tr>)}
     </Table>
     {f && <form className="upf" onSubmit={save} noValidate style={{ borderTop: '1px solid var(--g2)', paddingTop: 12 }}>
       <label htmlFor="tnName">Name<input type="text" id="tnName" value={f.name} onChange={set('name')} /></label>
@@ -134,6 +135,11 @@ function Tenants() {
       <label htmlFor="tnEps">Licensed EPS<input type="number" id="tnEps" min={0} value={f.licensedEps} onChange={set('licensedEps')} /></label>
       <label htmlFor="tnAssets">Licensed assets<input type="number" id="tnAssets" min={0} value={f.licensedAssets} onChange={set('licensedAssets')} /></label>
       <label htmlFor="tnRenew">Renewal date<input type="date" id="tnRenew" value={f.renewalDate} onChange={set('renewalDate')} /></label>
+      <fieldset className="span-wide catpick"><legend>Customer categories</legend>
+        {meta.categories.map(c => <label key={c.code} className="chk" htmlFor={'cat-' + c.code.replace('+', 'plus')}>
+          <input type="checkbox" id={'cat-' + c.code.replace('+', 'plus')} checked={f.categories.includes(c.code)}
+            onChange={e => setF({ ...f, categories: e.target.checked ? [...f.categories, c.code] : f.categories.filter(x => x !== c.code) })} /> {c.code} · {c.name}</label>)}
+      </fieldset>
       <label htmlFor="tnServices" className="span-wide">Subscribed services, one per line<textarea id="tnServices" rows={3} value={f.services} onChange={set('services')} /></label>
       <label htmlFor="tnSources" className="span-wide">Contracted log sources, one per line. Add (pending) to any not yet onboarded.<textarea id="tnSources" rows={4} value={f.sources} onChange={set('sources')} /></label>
       <span className="rowact"><button className="btn" type="submit" disabled={busy} id="tnSave">Save tenant</button><button className="btn ghost" type="button" onClick={() => setF(null)}>Cancel</button></span>

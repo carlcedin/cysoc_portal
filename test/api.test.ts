@@ -335,3 +335,29 @@ test('sign-out ends the session', async () => {
   await c.call('POST', '/api/auth/logout');
   assert.equal((await c.call('GET', '/api/escalations')).status, 401);
 });
+
+test('customer categories: directory, filtering and validation', async () => {
+  const all = await analyst.call('GET', '/api/customers');
+  assert.equal(all.status, 200);
+  assert.equal(all.data.items.length, 6);
+  assert.equal(all.data.categories.length, 7);
+  const tsam = await analyst.call('GET', '/api/customers?category=TSAM');
+  assert.deepEqual(tsam.data.items.map((c: any) => c.code).sort(), ['bayu', 'cahaya', 'permata', 'seri']);
+  assert.equal(all.data.counts.TSAM, 4);
+  const plus = await analyst.call('GET', '/api/customers?category=TSN%2B');
+  assert.deepEqual(plus.data.items.map((c: any) => c.code), ['nusa']);
+  assert.ok(tsam.data.items.every((c: any) => typeof c.open === 'number' && typeof c.overdue === 'number'));
+  assert.equal((await analyst.call('GET', '/api/customers?category=XYZ')).status, 400);
+  assert.equal((await seri.call('GET', '/api/customers')).status, 403, 'customers cannot list other customers');
+  const meta = await seri.call('GET', '/api/meta');
+  assert.deepEqual(meta.data.tenants[0].categories, ['TSAM', 'VA', 'PAM']);
+  // Saving a tenant validates categories
+  const base = { code: 'cat-test', name: 'Category Test Sdn Bhd', service: 'TMDR', siem: 'Antarex' };
+  assert.equal((await admin.call('POST', '/api/admin/tenants', { ...base, categories: [] })).status, 400, 'at least one category');
+  assert.equal((await admin.call('POST', '/api/admin/tenants', { ...base, categories: ['TMDR', 'BOGUS'] })).status, 400, 'unknown category');
+  const ok = await admin.call('POST', '/api/admin/tenants', { ...base, categories: ['TMDR', 'TSN+'] });
+  assert.equal(ok.status, 200, JSON.stringify(ok.data));
+  const tmdr = await analyst.call('GET', '/api/customers?category=TMDR');
+  assert.ok(tmdr.data.items.some((c: any) => c.code === 'cat-test'));
+  assert.equal((await analyst.call('POST', '/api/admin/tenants', { ...base, code: 'x2', categories: ['VA'] })).status, 403, 'analysts cannot add tenants');
+});

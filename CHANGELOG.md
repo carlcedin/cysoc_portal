@@ -1,5 +1,11 @@
 # Changes
 
+## 1.1.0
+- Customer categories: TSAM, TMDR, DDoS, TSN, TSN+, VA, PAM. A customer can belong to several; set them under Administration > Tenants.
+- Staff now land on **Customers**: choose a category, see its customers with open escalations, awaiting and overdue acknowledgements, open requests, last report and renewal; click a customer to open its workspace.
+- Customer workspace: tickets and escalations, security dashboard, scorecard, requests, reports, service and contacts, and audit log for that customer only, with a back button and a customer switcher.
+- Migration 003 adds the categories and fills them in where existing data is clear (TSAM, TMDR, DDoS, VA, PAM).
+
 ## 1.0.3
 - `MFA_REQUIRED` setting in `.env` (default `true`). When `false`, accounts sign in with a password only; staff see a warning banner, the server logs a warning, and each sign-in is audited as password-only.
 

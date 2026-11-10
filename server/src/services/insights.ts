@@ -3,6 +3,7 @@ import { route, badRequest } from '../http/core.js';
 import { withCtx } from '../db/index.js';
 import { need, scope } from './common.js';
 import { tenantDashboard, combine, RANGES, type RangeKey } from '../integrations/grafana.js';
+import { CATEGORIES, CATEGORY_CODES } from './categories.js';
 
 route('GET', '/api/dashboard', async (req) => {
   const t = scope(req);
@@ -78,7 +79,7 @@ route('GET', '/api/health-scores', async (req) => {
   need(req, 'viewHealth');
   return withCtx(req.ctx, async tx => {
     const rows = await tx.query(`
-      SELECT t.id, t.name, t.service, t.siem, t.licensed_eps, t.services, t.renewal_date, t.contacts_confirmed_at,
+      SELECT t.id, t.name, t.service, t.siem, t.licensed_eps, t.services, t.categories, t.renewal_date, t.contacts_confirmed_at,
              m.peak_eps_30d::float AS peak_eps, m.sources_down, m.sources_total, m.refreshed_at,
              (SELECT count(*)::int FROM escalations e JOIN sla_targets s ON s.severity = e.severity
                 WHERE e.tenant_id = t.id AND e.escalated_at > now() - interval '30 days') AS esc_total,
@@ -111,13 +112,37 @@ route('GET', '/api/health-scores', async (req) => {
       const renewalDays = r.renewal_date ? Math.ceil((new Date(r.renewal_date).getTime() - Date.now()) / day) : null;
       if (renewalDays !== null && renewalDays <= 90) { signals.push({ level: 'info', text: `Renewal in ${renewalDays} days` }); score -= 5; }
       if (r.unread_reports >= 2) { signals.push({ level: 'info', text: `${r.unread_reports} reports unread` }); score -= 5; }
-      const svc = (r.services || []).join(' ').toLowerCase();
-      if (!svc.includes('vulnerability')) opportunities.push('Vulnerability assessment');
-      if (!svc.includes('ddos')) opportunities.push('DDoS detection');
+      const cats: string[] = r.categories || [];
+      if (!cats.includes('VA')) opportunities.push('Vulnerability assessment');
+      if (!cats.includes('DDoS')) opportunities.push('DDoS detection');
       if (r.pending_sources) opportunities.push(`${r.pending_sources} log source${r.pending_sources > 1 ? 's' : ''} to onboard`);
       score = Math.max(0, score);
-      return { id: r.id, name: r.name, service: r.service, score, state: score >= 85 ? 'Healthy' : score >= 65 ? 'Watch' : 'At risk', signals, opportunities, renewalDate: r.renewal_date, renewalDays };
+      return { id: r.id, name: r.name, service: r.service, categories: r.categories, score, state: score >= 85 ? 'Healthy' : score >= 65 ? 'Watch' : 'At risk', signals, opportunities, renewalDate: r.renewal_date, renewalDays };
     }).sort((a: any, b: any) => a.score - b.score);
     return { items: out };
+  });
+});
+
+// ---------- Customer directory (staff): customers in a category with their live workload ----------
+route('GET', '/api/customers', async (req) => {
+  need(req, 'viewAllTenants');
+  const category = req.query.get('category') || 'all';
+  if (category !== 'all' && !CATEGORY_CODES.includes(category)) throw badRequest('Unknown customer category.');
+  return withCtx(req.ctx, async tx => {
+    const items = await tx.query(`
+      SELECT t.id, t.code, t.name, t.service, t.siem, t.categories, t.renewal_date, t.licensed_eps, t.licensed_assets,
+             count(e.id) FILTER (WHERE e.status <> 'closed')::int AS open,
+             count(e.id) FILTER (WHERE e.status = 'triage')::int AS triage,
+             count(e.id) FILTER (WHERE e.status = 'escalated')::int AS awaiting,
+             count(e.id) FILTER (WHERE e.status = 'escalated' AND now() - e.escalated_at > s.ack_hours * interval '1 hour')::int AS overdue,
+             (SELECT count(*)::int FROM service_requests r WHERE r.tenant_id = t.id AND r.status <> 'Completed') AS open_requests,
+             (SELECT max(r.uploaded_at) FROM reports r WHERE r.tenant_id = t.id AND r.withdrawn_at IS NULL) AS last_report
+      FROM tenants t
+      LEFT JOIN escalations e ON e.tenant_id = t.id
+      LEFT JOIN sla_targets s ON s.severity = e.severity
+      WHERE t.active AND ($1 = 'all' OR $1 = ANY(t.categories))
+      GROUP BY t.id ORDER BY t.name`, [category]);
+    const counts = await tx.query(`SELECT c AS code, count(*)::int AS n FROM tenants, unnest(categories) AS c WHERE active GROUP BY c`);
+    return { categories: CATEGORIES, counts: Object.fromEntries(counts.map((r: any) => [r.code, r.n])), total: (await tx.one('SELECT count(*)::int AS n FROM tenants WHERE active')).n, items };
   });
 });

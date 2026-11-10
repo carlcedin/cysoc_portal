@@ -19,12 +19,12 @@ const pick = <T>(a: T[]) => a[Math.floor(r() * a.length)];
 const H = 3600_000, D = 24 * H, now = Date.now();
 
 const TENANTS = [
-  { code: 'seri', name: 'Seri Kenanga Healthcare', service: 'TSAM', siem: 'QRadar', eps: 2500, assets: null, services: ['TSAM security monitoring', 'Vulnerability assessment (quarterly)', 'Managed PAM'], renewal: '2027-03-31', confirmed: 20, pending: [] as string[] },
-  { code: 'bayu', name: 'Bayu Logistics', service: 'TSAM', siem: 'QRadar', eps: 1000, assets: null, services: ['TSAM security monitoring', 'DDoS detection and alerting'], renewal: '2026-12-31', confirmed: 152, pending: ['Oracle ERP database', 'HR system (SaaS)'] },
-  { code: 'permata', name: 'Permata Capital', service: 'TSAM', siem: 'QRadar', eps: 1500, assets: null, services: ['TSAM security monitoring', 'Vulnerability assessment (quarterly)', 'Managed PAM', 'DDoS detection and alerting'], renewal: '2027-06-30', confirmed: 45, pending: ['Core banking middleware'] },
-  { code: 'lembah', name: 'Lembah Utilities', service: 'Antarex MXOC', siem: 'Antarex', eps: null, assets: 120, services: ['Antarex MXOC monitoring'], renewal: '2027-01-15', confirmed: 70, pending: ['SCADA historian'] },
-  { code: 'nusa', name: 'Nusa Retail Group', service: 'Antarex MXOC', siem: 'Antarex', eps: null, assets: 80, services: ['Antarex MXOC monitoring', 'Vulnerability assessment (quarterly)'], renewal: '2027-09-30', confirmed: 118, pending: [] },
-  { code: 'cahaya', name: 'Cahaya University', service: 'TSAM', siem: 'QRadar', eps: 2000, assets: null, services: ['TSAM security monitoring', 'DDoS detection and alerting'], renewal: '2026-11-30', confirmed: 33, pending: [] },
+  { code: 'seri', categories: ['TSAM', 'VA', 'PAM'], name: 'Seri Kenanga Healthcare', service: 'TSAM', siem: 'QRadar', eps: 2500, assets: null, services: ['TSAM security monitoring', 'Vulnerability assessment (quarterly)', 'Managed PAM'], renewal: '2027-03-31', confirmed: 20, pending: [] as string[] },
+  { code: 'bayu', categories: ['TSAM', 'DDoS'], name: 'Bayu Logistics', service: 'TSAM', siem: 'QRadar', eps: 1000, assets: null, services: ['TSAM security monitoring', 'DDoS detection and alerting'], renewal: '2026-12-31', confirmed: 152, pending: ['Oracle ERP database', 'HR system (SaaS)'] },
+  { code: 'permata', categories: ['TSAM', 'VA', 'PAM', 'DDoS'], name: 'Permata Capital', service: 'TSAM', siem: 'QRadar', eps: 1500, assets: null, services: ['TSAM security monitoring', 'Vulnerability assessment (quarterly)', 'Managed PAM', 'DDoS detection and alerting'], renewal: '2027-06-30', confirmed: 45, pending: ['Core banking middleware'] },
+  { code: 'lembah', categories: ['TMDR', 'TSN'], name: 'Lembah Utilities', service: 'Antarex MXOC', siem: 'Antarex', eps: null, assets: 120, services: ['Antarex MXOC monitoring'], renewal: '2027-01-15', confirmed: 70, pending: ['SCADA historian'] },
+  { code: 'nusa', categories: ['TMDR', 'VA', 'TSN+'], name: 'Nusa Retail Group', service: 'Antarex MXOC', siem: 'Antarex', eps: null, assets: 80, services: ['Antarex MXOC monitoring', 'Vulnerability assessment (quarterly)'], renewal: '2027-09-30', confirmed: 118, pending: [] },
+  { code: 'cahaya', categories: ['TSAM', 'DDoS'], name: 'Cahaya University', service: 'TSAM', siem: 'QRadar', eps: 2000, assets: null, services: ['TSAM security monitoring', 'DDoS detection and alerting'], renewal: '2026-11-30', confirmed: 33, pending: [] },
 ];
 const SOURCES: Record<string, string[]> = {
   QRadar: ['FortiGate HQ firewall', 'Palo Alto internet edge', 'Windows DC01', 'Windows DC02', 'Exchange server', 'Linux web cluster', 'Microsoft 365 audit', 'Core switch syslog'],
@@ -60,9 +60,9 @@ await asSystem(async tx => {
   await tx.query("INSERT INTO users (name, email, role, password_hash, must_change_password) VALUES ('CySOC Admin Demo', 'admin@cysoc.example', 'admin', $1, false)", [hash]);
   for (const [i, t] of TENANTS.entries()) {
     const [{ id }] = await tx.query(
-      `INSERT INTO tenants (code, name, service, siem, licensed_eps, licensed_assets, services, renewal_date, contacts_confirmed_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() - ($9 || ' days')::interval) RETURNING id`,
-      [t.code, t.name, t.service, t.siem, t.eps, t.assets, t.services, t.renewal, String(t.confirmed)]);
+      `INSERT INTO tenants (code, name, service, siem, licensed_eps, licensed_assets, services, renewal_date, contacts_confirmed_at, categories)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now() - ($9 || ' days')::interval, $10) RETURNING id`,
+      [t.code, t.name, t.service, t.siem, t.eps, t.assets, t.services, t.renewal, String(t.confirmed), t.categories]);
     await tx.query(`INSERT INTO integrations (id, kind, name, tenant_id, endpoint, auth_label, settings) VALUES ($1,'dashboard',$2,$3,$4,'Service account token (Viewer)','{"panels":{}}')`,
       [`grafana:${t.code}`, `Grafana · ${t.name}`, id, `https://grafana-${t.code}.cysoc.example`]);
     for (const src of SOURCES[t.siem]) await tx.query('INSERT INTO log_source_contracts (tenant_id, name, onboarded) VALUES ($1,$2,true)', [id, src]);

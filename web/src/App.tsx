@@ -11,11 +11,13 @@ import { Service } from './views/Service';
 import { Audit } from './views/Audit';
 import { Health } from './views/Health';
 import { Admin } from './views/Admin';
+import { Customers, CatPills } from './views/Customers';
 
 export interface Meta {
   user: { id: string; name: string; email: string; role: 'admin' | 'analyst' | 'customer'; tenantId: string | null; tenantName: string | null };
   permissions: string[];
-  tenants: { id: string; code: string; name: string; service: string; siem: string }[];
+  tenants: { id: string; code: string; name: string; service: string; siem: string; categories: string[] }[];
+  categories: { code: string; name: string }[];
   sla: { severity: string; escalate_minutes: number; ack_hours: number }[];
   requestTypes: Record<string, number>;
   reportTypes: string[];
@@ -111,6 +113,7 @@ function ChangePassword({ next }: { next: (s: Stage) => void }) {
 }
 
 const VIEWS = [
+  { id: 'customers', label: 'Customers', perm: 'viewAllTenants' },
   { id: 'escalations', label: 'Escalations', perm: null },
   { id: 'dashboard', label: 'Security dashboard', perm: null },
   { id: 'scorecard', label: 'Scorecard', perm: null },
@@ -121,26 +124,35 @@ const VIEWS = [
   { id: 'health', label: 'Customer health', perm: 'viewHealth' },
   { id: 'admin', label: 'Administration', perm: 'viewIntegrations' },
 ] as const;
-const SCOPED = new Set(['escalations', 'dashboard', 'scorecard', 'requests', 'reports', 'service', 'audit']);
+// Tabs inside one customer's workspace.
+const WORKSPACE = new Set(['escalations', 'dashboard', 'scorecard', 'requests', 'reports', 'service', 'audit']);
+const LABEL_IN_WORKSPACE: Record<string, string> = { escalations: 'Tickets and escalations', service: 'Service and contacts' };
 
 function Portal({ meta, signOut }: { meta: Meta; signOut: () => void }) {
   const can = (p: string) => meta.permissions.includes(p);
   const staff = meta.user.role !== 'customer';
-  const views = VIEWS.filter(v => !v.perm || can(v.perm));
-  const fromHash = () => { const h = location.hash.slice(1); return views.some(v => v.id === h) ? h : 'escalations'; };
-  const [view, setView] = useState(fromHash);
-  const [scope, setScope] = useState('all');
-  useEffect(() => { const f = () => setView(fromHash()); window.addEventListener('hashchange', f); return () => window.removeEventListener('hashchange', f); }, []);
+  const [scope, setScopeState] = useState('all');                 // 'all' = overview, otherwise a tenant id
+  const [category, setCategory] = useState('all');
+  const inWorkspace = staff && scope !== 'all';
+  const views = VIEWS.filter(v => (!v.perm || can(v.perm)) && (!inWorkspace || WORKSPACE.has(v.id)));
+  const home = staff ? 'customers' : 'escalations';
+  const valid = (v: string) => VIEWS.some(x => x.id === v && (!x.perm || can(x.perm)));
+  const [view, setView] = useState(() => { const h = location.hash.slice(1); return valid(h) ? h : home; });
+  useEffect(() => { const f = () => { const h = location.hash.slice(1); if (valid(h)) setView(h); }; window.addEventListener('hashchange', f); return () => window.removeEventListener('hashchange', f); }, []);
   const go = (v: string) => { setView(v); if (location.hash.slice(1) !== v) location.hash = v; };
-  const scopeName = staff ? (scope === 'all' ? 'All tenants' : meta.tenants.find(t => t.id === scope)?.name ?? 'Tenant') : meta.user.tenantName;
+  // Opening a customer keeps the current tab when it exists in the workspace, otherwise shows its tickets.
+  const openCustomer = (id: string) => { setScopeState(id); if (id === 'all') go('customers'); else if (!WORKSPACE.has(view)) go('escalations'); window.scrollTo({ top: 0 }); };
   const tenant = meta.tenants.find(t => t.id === (staff ? scope : meta.user.tenantId));
+  const inCategory = meta.tenants.filter(t => category === 'all' || t.categories.includes(category));
   const roleLabel = { admin: 'Full Admin', analyst: 'Analyst', customer: 'Customer' }[meta.user.role];
-  const props: ViewProps = { meta, scope: staff ? scope : meta.user.tenantId!, setScope: (s) => setScope(s), can };
+  const shown = views.some(v => v.id === view) ? view : (inWorkspace ? 'escalations' : home);
+  const props: ViewProps = { meta, scope: staff ? scope : meta.user.tenantId!, setScope: openCustomer, can };
   const content = useMemo(() => ({
+    customers: <Customers {...props} category={category} setCategory={setCategory} openCustomer={openCustomer} />,
     escalations: <Escalations {...props} />, dashboard: <Dashboard {...props} />, scorecard: <Scorecard {...props} />,
     requests: <Requests {...props} />, reports: <Reports {...props} />, service: <Service {...props} />,
-    audit: <Audit {...props} />, health: <Health {...props} goService={(id: string) => { setScope(id); go('service'); }} />, admin: <Admin {...props} />,
-  } as Record<string, React.ReactNode>)[view], [view, scope, meta]);
+    audit: <Audit {...props} />, health: <Health {...props} goService={(id: string) => { setScopeState(id); go('service'); }} />, admin: <Admin {...props} />,
+  } as Record<string, React.ReactNode>)[shown], [shown, scope, category, meta]);
 
   return <>
     <Band right={<div className="who">
@@ -151,13 +163,22 @@ function Portal({ meta, signOut }: { meta: Meta; signOut: () => void }) {
     <div className="wrap">
       {!meta.mfaRequired && staff && <div className="stale" role="alert"><div><b>MFA is turned off.</b> Accounts sign in with a password only. Set MFA_REQUIRED=true in .env before customers get access.</div></div>}
       {meta.integrationMode === 'demo' && <div className="banner">Demo mode: dashboards show generated sample data and no email, SMS or NTS calls are made.</div>}
-      <div className="scope"><h2 id="scopeTitle">{scopeName}</h2><span className="meta">{tenant ? `${tenant.service} · ${tenant.siem}` : staff ? `${meta.tenants.length} tenants` : ''}</span></div>
+      {inWorkspace && <div className="crumbs">
+        <button className="btn sm ghost" id="backToCustomers" onClick={() => openCustomer('all')}>← {category === 'all' ? 'All customers' : `${category} customers`}</button>
+        <div className="who"><label htmlFor="custSwitch">Switch customer</label>
+          <select id="custSwitch" value={scope} onChange={e => openCustomer(e.target.value)}>
+            {(inCategory.some(t => t.id === scope) ? inCategory : meta.tenants).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select></div>
+      </div>}
+      <div className="scope">
+        <h2 id="scopeTitle">{staff ? (inWorkspace ? tenant?.name ?? 'Customer' : 'All customers') : meta.user.tenantName}</h2>
+        <span className="meta">{tenant ? `${tenant.service} · ${tenant.siem}` : `${meta.tenants.length} customers`}</span>
+        {tenant && <CatPills cats={tenant.categories} />}
+      </div>
       <nav className="tabs" id="tabs" role="tablist" aria-label="Portal sections">
-        {views.map(v => <button key={v.id} className="tab" role="tab" id={'tab-' + v.id} aria-selected={v.id === view} onClick={() => go(v.id)}>{v.id === 'service' && !staff ? 'My service' : v.label}</button>)}
+        {views.map(v => <button key={v.id} className="tab" role="tab" id={'tab-' + v.id} aria-selected={v.id === shown} onClick={() => go(v.id)}>{v.id === 'service' && !staff ? 'My service' : inWorkspace ? (LABEL_IN_WORKSPACE[v.id] ?? v.label) : v.label}</button>)}
       </nav>
-      {staff && SCOPED.has(view) && <div className="scopebar who" id="scopeBar"><label htmlFor="scopeSel">Tenant</label>
-        <select id="scopeSel" value={scope} onChange={e => setScope(e.target.value)}><option value="all">All tenants</option>{meta.tenants.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>}
-      <div className="view" key={view + scope}>{content}</div>
+      <div className="view" key={shown + scope}>{content}</div>
     </div>
     <footer className="foot"><span className="tm">Time</span><p>CySOC 24x7 Security Operations Centre. Escalation data syncs with NTS; dashboards query each tenant's Grafana; every sign-in, download and change is recorded in the audit log.</p></footer>
   </>;

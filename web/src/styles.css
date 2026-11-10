@@ -208,3 +208,9 @@ input[type=password],input[type=email],input[type=number],input[type=date]{font:
 .temp-pw{border:1.5px solid var(--black);border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
 .json{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;border:1px solid var(--g2);border-radius:14px;padding:10px 12px;width:100%;min-height:160px}
 .drawer-close{align-self:flex-end}
+
+.crumbs{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between}
+.pillk.cat{background:var(--black);color:var(--white);font-weight:600;letter-spacing:.04em}
+.scope .pills{align-self:center}
+.catpick{border:1px solid var(--g2);border-radius:14px;padding:10px 14px;margin:0;display:flex;flex-wrap:wrap;gap:8px 18px;grid-column:1/-1}
+.catpick legend{font-size:11px;color:var(--g4);text-transform:uppercase;letter-spacing:.08em;font-weight:500;padding:0 6px}
