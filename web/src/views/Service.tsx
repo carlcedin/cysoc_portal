@@ -47,7 +47,7 @@ export function Service({ meta, scope, setScope, can }: ViewProps) {
     <div className="dgrid">
       <Panel cls="span4" title="Subscribed services" src="Contract schedule">
         <div className="pills">{t.services.map((s: string) => <span key={s} className="pillk pink">{s}</span>)}</div>
-        <dl className="kv"><dt>Monitoring hours</dt><dd>{t.monitoring_hours}, CySOC</dd><dt>SIEM platform</dt><dd>{t.siem === 'QRadar' ? 'IBM QRadar' : 'Antarex (Wazuh)'}</dd><dt>Contract renewal</dt><dd>{fmtD(t.renewal_date)}</dd></dl>
+        <dl className="kv"><dt>Monitoring hours</dt><dd>{t.monitoring_hours}, CySOC</dd><dt>SIEM platform</dt><dd>{t.siem === 'QRadar' ? 'IBM QRadar' : t.siem === 'Antarex' ? 'Antarex (Wazuh)' : 'No SIEM monitoring'}</dd><dt>Contract renewal</dt><dd>{fmtD(t.renewal_date)}</dd></dl>
       </Panel>
       <Panel cls="span4" title="Log source onboarding" src="Contracted versus collecting">
         <div className="prog"><span className="hbt"><i style={{ width: `${pctOn}%` }} /></span><b>{pctOn}%</b></div>

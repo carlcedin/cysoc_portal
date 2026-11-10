@@ -43,7 +43,7 @@ let lastMetrics = 0;
 async function refreshMetrics() {
   if (Date.now() - lastMetrics < 15 * 60_000) return;
   lastMetrics = Date.now();
-  const tenants = await asSystem(tx => tx.query('SELECT id, code, name, siem, licensed_eps, licensed_assets FROM tenants WHERE active'));
+  const tenants = await asSystem(tx => tx.query("SELECT id, code, name, siem, licensed_eps, licensed_assets FROM tenants WHERE active AND siem <> 'None'"));
   for (const t of tenants) {
     try {
       const d = await tenantDashboard(t, '30d');

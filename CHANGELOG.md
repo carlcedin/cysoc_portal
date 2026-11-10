@@ -1,5 +1,9 @@
 # Changes
 
+## 1.2.0
+- Bulk customer import under Administration > Tenants > Import customers: paste rows copied from Excel or choose a CSV file, tick the categories every row gets, check the preview, then import. Existing customers (matched by code or name) gain the new categories instead of being duplicated; bad rows are skipped and listed. Up to 3,000 rows at a time.
+- Customers can have no SIEM (for example DDoS only). They get no Grafana connection, are left out of the combined security dashboard, and their workspace explains there is no SIEM dashboard.
+
 ## 1.1.0
 - Customer categories: TSAM, TMDR, DDoS, TSN, TSN+, VA, PAM. A customer can belong to several; set them under Administration > Tenants.
 - Staff now land on **Customers**: choose a category, see its customers with open escalations, awaiting and overdue acknowledgements, open requests, last report and renewal; click a customer to open its workspace.

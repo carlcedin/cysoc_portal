@@ -4,7 +4,7 @@ name: cysoc-portal
 
 x-app: &app
   build: .
-  image: cysoc-portal:1.1.0
+  image: cysoc-portal:1.2.0
   env_file: .env
   environment:
     DATABASE_URL: postgres://portal_app:${PORTAL_APP_PASSWORD}@db:5432/cysoc_portal

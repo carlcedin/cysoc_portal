@@ -3,6 +3,7 @@ import { api } from '../api';
 import { useApi, Panel, Pill, Table, Loading, ErrorBox, Chips, Msg, useAction, fmt, Sev } from '../ui';
 import type { ViewProps } from '../App';
 import { CatPills } from './Customers';
+import { parseImport, TEMPLATE_CSV, type ImportRow } from '../importParse';
 
 const IST: Record<string, [string, string]> = { ok: ['p-closed', 'Connected'], warn: ['p-rem', 'Attention'], error: ['p-esc', 'Error'], unknown: ['p-off', 'Not tested'] };
 const permCell = (v: string) => <Pill c={v === 'No' || v === 'No access' ? 'p-off' : ['Yes', 'Edit', 'Manage'].includes(v) ? 'p-closed' : 'p-ack'}>{v}</Pill>;
@@ -114,6 +115,7 @@ function Tenants({ meta }: { meta: ViewProps['meta'] }) {
   const { msg, busy, run } = useAction();
   const blank = { id: '', code: '', name: '', service: 'TSAM', siem: 'QRadar', licensedEps: '', licensedAssets: '', services: '', renewalDate: '', sources: '', categories: [] as string[] };
   const [f, setF] = useState<typeof blank | null>(null);
+  const [importing, setImporting] = useState(false);
   if (error) return <ErrorBox msg={error} />;
   if (loading && !data) return <Loading />;
   const open = (t?: any) => setF(t ? { id: t.id, code: t.code, name: t.name, service: t.service, siem: t.siem, licensedEps: t.licensed_eps ?? '', licensedAssets: t.licensed_assets ?? '', services: t.services.join('\n'), renewalDate: t.renewal_date ? String(t.renewal_date).slice(0, 10) : '', categories: t.categories ?? [], sources: t.log_sources.map((s: any) => s.name + (s.onboarded ? '' : ' (pending)')).join('\n') } : blank);
@@ -123,7 +125,8 @@ function Tenants({ meta }: { meta: ViewProps['meta'] }) {
     run(() => api(f.id ? 'PUT' : 'POST', f.id ? `/api/admin/tenants/${f.id}` : '/api/admin/tenants', body), `${f.name} saved.${f.id ? '' : ' Add its Grafana connection under API configuration. Sign out and in again to see it in tenant lists.'}`, () => { setF(null); reload(); });
   };
   const set = (k: string) => (e: React.ChangeEvent<any>) => setF({ ...f!, [k]: e.target.value });
-  return <Panel title="Tenants" right={<button className="btn sm" onClick={() => open()} id="tnNew">Add tenant</button>}>
+  return <Panel title="Tenants" right={<span className="rowact"><button className="btn sm ghost" onClick={() => setImporting(!importing)} id="tnImport">Import customers</button><button className="btn sm" onClick={() => open()} id="tnNew">Add tenant</button></span>}>
+    {importing && <ImportCustomers meta={meta} onDone={reload} onClose={() => setImporting(false)} />}
     <Table head={<><th>Tenant</th><th>Code (NTS)</th><th>Categories</th><th>Service</th><th>Licence</th><th>Renewal</th><th></th></>}>
       {data.items.map((t: any) => <tr key={t.id}><td><b>{t.name}</b></td><td className="mono">{t.code}</td><td className="wrap-t"><CatPills cats={t.categories ?? []} /></td><td>{t.service} · {t.siem}</td><td>{t.licensed_eps ? `${t.licensed_eps} EPS` : t.licensed_assets ? `${t.licensed_assets} assets` : '—'}</td><td>{t.renewal_date ? String(t.renewal_date).slice(0, 10) : '—'}</td><td><button className="btn sm ghost" onClick={() => open(t)}>Edit</button></td></tr>)}
     </Table>
@@ -131,7 +134,7 @@ function Tenants({ meta }: { meta: ViewProps['meta'] }) {
       <label htmlFor="tnName">Name<input type="text" id="tnName" value={f.name} onChange={set('name')} /></label>
       <label htmlFor="tnCode">Code used in NTS<input type="text" id="tnCode" value={f.code} onChange={set('code')} placeholder="e.g. seri" /></label>
       <label htmlFor="tnService">Service<input type="text" id="tnService" value={f.service} onChange={set('service')} /></label>
-      <label htmlFor="tnSiem">SIEM<select id="tnSiem" value={f.siem} onChange={set('siem')}><option>QRadar</option><option>Antarex</option></select></label>
+      <label htmlFor="tnSiem">SIEM<select id="tnSiem" value={f.siem} onChange={set('siem')}><option>QRadar</option><option>Antarex</option><option value="None">None (no SIEM, e.g. DDoS only)</option></select></label>
       <label htmlFor="tnEps">Licensed EPS<input type="number" id="tnEps" min={0} value={f.licensedEps} onChange={set('licensedEps')} /></label>
       <label htmlFor="tnAssets">Licensed assets<input type="number" id="tnAssets" min={0} value={f.licensedAssets} onChange={set('licensedAssets')} /></label>
       <label htmlFor="tnRenew">Renewal date<input type="date" id="tnRenew" value={f.renewalDate} onChange={set('renewalDate')} /></label>
@@ -170,4 +173,62 @@ function Permissions() {
       {data.permissions.map((p: any) => <tr key={p.capability}><td><b>{p.capability}</b></td><td>{permCell(p.admin)}</td><td>{permCell(p.analyst)}</td><td>{permCell(p.customer)}</td></tr>)}
     </Table>
   </Panel>;
+}
+
+const ACT: Record<string, [string, string]> = { create: ['p-closed', 'New'], update: ['p-ack', 'Add category'], unchanged: ['p-off', 'No change'], error: ['p-esc', 'Skipped'] };
+function ImportCustomers({ meta, onDone, onClose }: { meta: ViewProps['meta']; onDone: () => void; onClose: () => void }) {
+  const [text, setText] = useState('');
+  const [defaults, setDefaults] = useState<string[]>([]);
+  const [parsed, setParsed] = useState<{ rows: ImportRow[]; columns: string[]; warning?: string } | null>(null);
+  const [preview, setPreview] = useState<any>(null);
+  const [done, setDone] = useState<any>(null);
+  const { msg, setMsg, busy, run } = useAction();
+  const reset = () => { setPreview(null); setDone(null); setMsg(null); };
+  const loadFile = async (file?: File) => { if (!file) return; setText(await file.text()); reset(); };
+  const check = () => {
+    const p = parseImport(text); setParsed(p); setDone(null);
+    if (!p.rows.length) { setMsg({ text: 'Nothing to import. Paste rows from Excel or choose a CSV file.', err: true }); return; }
+    run(() => api('POST', '/api/admin/tenants/import', { rows: p.rows, defaultCategories: defaults, dryRun: true }), (r: any) => { setPreview(r); return `Checked ${p.rows.length} rows. Review them below, then import.`; });
+  };
+  const doImport = () => run(() => api('POST', '/api/admin/tenants/import', { rows: parsed!.rows, defaultCategories: defaults, dryRun: false }),
+    (r: any) => { setDone(r); setPreview(null); onDone(); return `Imported: ${r.summary.create} new customers, ${r.summary.update} updated. Sign out and in again to see them in every list.`; });
+  const result = done ?? preview;
+  const toImport = preview ? preview.summary.create + preview.summary.update : 0;
+  return <div className="importbox">
+    <div className="ph"><h3>Import customers</h3><button className="btn sm ghost" onClick={onClose}>Close</button></div>
+    <ol className="steps">
+      <li>In Excel, select the customer rows <b>including the header row</b> and copy them (Ctrl+C). A <b>Customer name</b> column is required; <b>Code</b>, <b>Categories</b> (for example <code>DDoS;VA</code>), <b>SIEM</b> and <b>Renewal date</b> are optional.</li>
+      <li>Paste below, or choose a CSV file (Excel: File &gt; Save As &gt; CSV UTF-8).</li>
+      <li>Tick the categories every row should get, then <b>Check</b>. Nothing is saved until you choose <b>Import</b>.</li>
+    </ol>
+    <fieldset className="catpick"><legend>Add these categories to every row</legend>
+      {meta.categories.map(c => <label key={c.code} className="chk" htmlFor={'imp-' + c.code.replace('+', 'plus')}>
+        <input type="checkbox" id={'imp-' + c.code.replace('+', 'plus')} checked={defaults.includes(c.code)}
+          onChange={e => { setDefaults(e.target.checked ? [...defaults, c.code] : defaults.filter(x => x !== c.code)); reset(); }} /> {c.code}</label>)}
+    </fieldset>
+    <label htmlFor="impText" className="nk">Paste from Excel</label>
+    <textarea id="impText" className="json" rows={8} placeholder={'Customer name\tRenewal date\nContoh Sdn Bhd\t31/12/2027'} value={text} onChange={e => { setText(e.target.value); reset(); }} />
+    <div className="actions">
+      <label className="btn sm ghost" htmlFor="impFile" style={{ cursor: 'pointer' }}>Choose CSV file<input id="impFile" type="file" accept=".csv,.txt,.tsv" hidden onChange={e => loadFile(e.target.files?.[0])} /></label>
+      <a className="btn sm ghost" href={'data:text/csv;charset=utf-8,' + encodeURIComponent(TEMPLATE_CSV)} download="customer-import-template.csv">Download template</a>
+      <button className="btn sm" id="impCheck" disabled={busy || !text.trim()} onClick={check}>Check</button>
+      {preview && toImport > 0 && <button className="btn sm" id="impGo" disabled={busy} onClick={doImport}>Import {toImport} customer{toImport === 1 ? '' : 's'}</button>}
+    </div>
+    {parsed?.warning && <div className="note">{parsed.warning}</div>}
+    {parsed && parsed.columns.length > 0 && <div className="note">Columns read: {parsed.columns.join(' · ')}</div>}
+    <Msg m={msg} />
+    {result && <>
+      <div className="pills">
+        <Pill c="p-closed">{result.summary.create} new</Pill><Pill c="p-ack">{result.summary.update} add category</Pill>
+        <Pill c="p-off">{result.summary.unchanged} no change</Pill><Pill c="p-esc">{result.summary.error} skipped</Pill>
+        {done && <b>Saved.</b>}
+      </div>
+      <Table head={<><th className="num">Row</th><th>Customer</th><th>Code</th><th>Categories</th><th>Result</th><th>Note</th></>}>
+        {[...result.results].sort((a: any, b: any) => (a.action === 'error' ? 0 : 1) - (b.action === 'error' ? 0 : 1) || a.row - b.row).slice(0, 300).map((r: any) => <tr key={r.row}>
+          <td className="num">{r.row}</td><td>{r.name}</td><td className="mono">{r.code}</td><td><CatPills cats={r.categories} /></td>
+          <td><Pill c={ACT[r.action][0]}>{ACT[r.action][1]}</Pill></td><td className="wrap-t">{r.message ?? ''}</td></tr>)}
+      </Table>
+      {result.results.length > 300 && <p className="note">Showing 300 of {result.results.length} rows, skipped rows first.</p>}
+    </>}
+  </div>;
 }

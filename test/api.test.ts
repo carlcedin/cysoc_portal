@@ -361,3 +361,53 @@ test('customer categories: directory, filtering and validation', async () => {
   assert.ok(tmdr.data.items.some((c: any) => c.code === 'cat-test'));
   assert.equal((await analyst.call('POST', '/api/admin/tenants', { ...base, code: 'x2', categories: ['VA'] })).status, 403, 'analysts cannot add tenants');
 });
+
+test('bulk customer import: preview, create, merge categories, skip bad rows', async () => {
+  const rows = [
+    { name: 'Kedai Runcit Ali Sdn Bhd', renewalDate: '2027-12-31' },
+    { name: '  Hotel   Seri Pagi ' },
+    { name: 'Bayu Logistics' },                         // exists: gets DDoS added (already has it) -> unchanged
+    { name: 'Seri Kenanga Healthcare' },                // exists without DDoS -> category added
+    { name: 'Kedai Runcit Ali Sdn Bhd' },               // duplicate in file
+    { name: '' },                                       // empty
+    { name: 'Bad Cat Bhd', categories: 'DDoS;XYZ' },    // unknown category
+    { name: 'Bad Date Bhd', renewalDate: '2027-31-12' } // invalid date ignored, row still created
+  ];
+  const before = (await analyst.call('GET', '/api/customers?category=DDoS')).data.items.length;
+  const pre = await admin.call('POST', '/api/admin/tenants/import', { rows, defaultCategories: ['DDoS'], dryRun: true });
+  assert.equal(pre.status, 200, JSON.stringify(pre.data));
+  assert.deepEqual(pre.data.summary, { create: 3, update: 1, unchanged: 1, error: 3 });
+  assert.equal((await analyst.call('GET', '/api/customers?category=DDoS')).data.items.length, before, 'preview saves nothing');
+  const go = await admin.call('POST', '/api/admin/tenants/import', { rows, defaultCategories: ['DDoS'], dryRun: false });
+  assert.deepEqual(go.data.summary, { create: 3, update: 1, unchanged: 1, error: 3 });
+  const ddos = (await analyst.call('GET', '/api/customers?category=DDoS')).data.items;
+  assert.equal(ddos.length, before + 4);
+  const hotel = ddos.find((c: any) => c.name === 'Hotel Seri Pagi');
+  assert.ok(hotel, 'whitespace tidied'); assert.equal(hotel.code, 'hotel-seri-pagi'); assert.equal(hotel.siem, 'None');
+  assert.ok(ddos.some((c: any) => c.code === 'seri'), 'existing customer gained DDoS');
+  const seriMeta = (await seri.call('GET', '/api/meta')).data.tenants[0].categories;
+  assert.ok(seriMeta.includes('DDoS') && seriMeta.includes('TSAM'), 'categories merged, not replaced');
+  // No SIEM: no Grafana connection and a friendly dashboard
+  const integ = (await admin.call('GET', '/api/admin/integrations')).data.items;
+  assert.ok(!integ.some((i: any) => i.id === 'grafana:hotel-seri-pagi'));
+  const dash = await analyst.call('GET', `/api/dashboard?range=7d&tenant=${hotel.id}`);
+  assert.equal(dash.status, 200); assert.equal(dash.data.noSiem, true);
+  const all = await analyst.call('GET', '/api/dashboard?range=24h');
+  assert.ok(!all.data.tenants.some((t: any) => t.name === 'Hotel Seri Pagi'), 'no-SIEM customers left out of the dashboard');
+  // Re-running the same import changes nothing
+  const again = await admin.call('POST', '/api/admin/tenants/import', { rows: rows.slice(0, 2), defaultCategories: ['DDoS'], dryRun: false });
+  assert.deepEqual(again.data.summary, { create: 0, update: 0, unchanged: 2, error: 0 });
+  assert.equal((await analyst.call('POST', '/api/admin/tenants/import', { rows, defaultCategories: ['DDoS'] })).status, 403);
+  const [a] = await sys("SELECT count(*)::int AS n FROM audit_log WHERE action = 'Imported customers'");
+  assert.equal(a.n, 2);
+});
+
+test('import handles a large list in one go', async () => {
+  const rows = Array.from({ length: 200 }, (_, i) => ({ name: `DDoS Customer ${String(i + 1).padStart(3, '0')} Sdn Bhd` }));
+  const t0 = Date.now();
+  const r = await admin.call('POST', '/api/admin/tenants/import', { rows, defaultCategories: ['DDoS'], dryRun: false });
+  assert.equal(r.data.summary.create, 200);
+  assert.ok(Date.now() - t0 < 15000, `took ${Date.now() - t0} ms`);
+  const list = await analyst.call('GET', '/api/customers?category=DDoS');
+  assert.ok(list.data.items.length >= 204);
+});

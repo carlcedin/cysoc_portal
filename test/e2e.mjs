@@ -148,6 +148,20 @@ const ctx = (vp = { width: 1280, height: 900 }) => browser.newContext({ viewport
   fs.writeFileSync('/tmp/e2e-report.pdf', '%PDF-1.4\n%%EOF\n');
   await p.setInputFiles('#upFile', '/tmp/e2e-report.pdf'); await p.click('#upBtn'); await p.waitForTimeout(1000);
   check('admin uploaded a report', /Uploaded to Seri/.test(await p.textContent('.view')));
+  // Bulk import pasted from Excel
+  await p.click('#tab-admin'); await p.waitForSelector('#tnImport'); await p.click('#tnImport');
+  await p.check('#imp-DDoS');
+  await p.fill('#impText', 'No.\tCustomer Name\tContract End\n1\tKedai Runcit Ali Sdn Bhd\t31/12/2027\n2\tHotel Seri Pagi\t\n3\tSeri Kenanga Healthcare\t\n');
+  await p.click('#impCheck'); await p.waitForSelector('#impGo');
+  await (await p.$('.importbox')).screenshot({ path: `${SHOTS}/admin-import-preview.png` });
+  check('import preview shows 2 new and 1 update', /2 new/.test(await p.textContent('.importbox')) && /1 add category/.test(await p.textContent('.importbox')));
+  await p.click('#impGo'); await p.waitForTimeout(800);
+  check('import saved', /Imported: 2 new customers, 1 updated/.test(await p.textContent('.importbox')));
+  await p.click('#tab-customers'); await p.selectOption('#catSel', 'DDoS'); await p.waitForTimeout(600);
+  check('imported customers appear under DDoS', !!(await p.$('tr[data-cust="kedai-runcit-ali-sdn-bhd"]')) && !!(await p.$('tr[data-cust="seri"]')));
+  await p.click('tr[data-cust="hotel-seri-pagi"]'); await p.waitForSelector('#backToCustomers');
+  await p.click('#tab-dashboard'); await p.waitForTimeout(500);
+  check('no-SIEM customer shows a clear dashboard message', /no SIEM monitoring/.test(await p.textContent('.view')));
   await c.close();
 }
 

@@ -10,13 +10,14 @@ route('GET', '/api/dashboard', async (req) => {
   const range = (req.query.get('range') || '7d') as RangeKey;
   if (!RANGES[range]) throw badRequest('Choose 24h, 7d or 30d.');
   const { tenants, escalations } = await withCtx(req.ctx, async tx => ({
-    tenants: await tx.query('SELECT id, code, name, siem, licensed_eps, licensed_assets FROM tenants WHERE active AND ($1::uuid IS NULL OR id = $1) ORDER BY name', [t]),
+    // Customers without a SIEM (for example DDoS-only) have no security dashboard.
+    tenants: await tx.query("SELECT id, code, name, siem, licensed_eps, licensed_assets FROM tenants WHERE active AND siem <> 'None' AND ($1::uuid IS NULL OR id = $1) ORDER BY name", [t]),
     escalations: Number((await tx.one(`SELECT count(*)::int AS n FROM escalations WHERE escalated_at > now() - ($2 || ' hours')::interval AND ($1::uuid IS NULL OR tenant_id = $1)`, [t, String(RANGES[range].hours)]))?.n ?? 0),
   }));
   const per = await Promise.all(tenants.map(async (x: any) => ({ tenant: x, data: await tenantDashboard(x, range) })));
   if (t) {
     const one = per[0];
-    if (!one) throw badRequest('Unknown tenant.');
+    if (!one) return { data: { range, eps: [], alerts: [], tactics: [], rules: [], sources: [], configured: { eps: false, alerts: false, tactics: false, rules: false, sources: false }, errors: [] }, licensedEps: null, escalations, tenants: null, noSiem: true };
     return { data: one.data, licensedEps: one.tenant.licensed_eps, escalations, tenants: null };
   }
   const rows = per.map(({ tenant, data }) => {

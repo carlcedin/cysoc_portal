@@ -13,6 +13,7 @@ export function Dashboard({ meta, scope, setScope }: ViewProps) {
   const chips = <div className="filters"><Chips idPrefix="rng" value={range} options={RANGES} onChange={setRange} /></div>;
   if (error) return <>{chips}<ErrorBox msg={error} /></>;
   if (loading && !data) return <>{chips}<Loading /></>;
+  if (data.noSiem) return <>{chips}<section className="panel"><h3>Security dashboard</h3><p>This customer has no SIEM monitoring, so there is no security dashboard. Its tickets, requests, reports and contacts are in the other tabs.</p></section></>;
   const d = data.data;
   const hours = range === '24h' ? 24 : range === '7d' ? 168 : 720;
   const avg = d.eps.length ? d.eps.reduce((a: number, p: any) => a + p.v, 0) / d.eps.length : 0;

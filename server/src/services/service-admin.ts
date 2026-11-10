@@ -13,6 +13,7 @@ import { config } from '../config.js';
 import { CATEGORIES, CATEGORY_CODES } from './categories.js';
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SIEMS = ['QRadar', 'Antarex', 'None'] as const;
 
 // ---------- Session metadata for the front end ----------
 route('GET', '/api/meta', async (req) => withCtx(req.ctx, async tx => ({
@@ -289,7 +290,7 @@ async function saveTenant(req: any, id: string | null) {
   const code = str(b.code, 'a tenant code', 40).toLowerCase();
   if (!/^[a-z0-9][a-z0-9_-]*$/.test(code)) throw badRequest('Tenant codes use lowercase letters, numbers, hyphens and underscores, and must match the customer value in NTS.');
   const name = str(b.name, 'a name', 120), service = str(b.service, 'a service', 80);
-  const siem = oneOf(b.siem, ['QRadar', 'Antarex'] as const, 'SIEM');
+  const siem = oneOf(b.siem, SIEMS, 'SIEM');
   const intOrNull = (v: any, n: string) => { if (v === null || v === '' || v === undefined) return null; const x = Number(v); if (!Number.isInteger(x) || x < 0) throw badRequest(`${n} must be a whole number.`); return x; };
   const eps = intOrNull(b.licensedEps, 'Licensed EPS'), assets = intOrNull(b.licensedAssets, 'Licensed assets');
   const services: string[] = Array.isArray(b.services) ? b.services.map((s: unknown) => str(s, 'a service name', 120)).slice(0, 20) : [];
@@ -311,7 +312,7 @@ async function saveTenant(req: any, id: string | null) {
       const [r] = await tx.query(`INSERT INTO tenants (code, name, service, siem, licensed_eps, licensed_assets, services, renewal_date, monitoring_hours, categories) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
         [code, name, service, siem, eps, assets, services, renewal, str(b.monitoringHours ?? '24x7', 'monitoring hours', 60), categories]);
       tid = r.id;
-      await tx.query(`INSERT INTO integrations (id, kind, name, tenant_id, auth_label, settings) VALUES ($1, 'dashboard', $2, $3, 'Service account token (Viewer)', '{"panels":{}}') ON CONFLICT (id) DO NOTHING`, [`grafana:${code}`, `Grafana · ${name}`, tid]);
+      if (siem !== 'None') await tx.query(`INSERT INTO integrations (id, kind, name, tenant_id, auth_label, settings) VALUES ($1, 'dashboard', $2, $3, 'Service account token (Viewer)', '{"panels":{}}') ON CONFLICT (id) DO NOTHING`, [`grafana:${code}`, `Grafana · ${name}`, tid]);
     }
     await tx.query('DELETE FROM log_source_contracts WHERE tenant_id = $1', [tid]);
     for (const s of sources) await tx.query('INSERT INTO log_source_contracts (tenant_id, name, onboarded) VALUES ($1,$2,$3)', [tid, s.name, s.onboarded]);
@@ -320,6 +321,73 @@ async function saveTenant(req: any, id: string | null) {
   });
 }
 route('POST', '/api/admin/tenants', (req) => saveTenant(req, null));
+
+// ---------- Bulk import of customers (pasted from Excel or a CSV file, parsed in the browser) ----------
+const slugify = (s: string) => s.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'customer';
+route('POST', '/api/admin/tenants/import', async (req) => {
+  need(req, 'manageTenants');
+  const b = await req.body();
+  const rows: any[] = Array.isArray(b.rows) ? b.rows : [];
+  if (!rows.length) throw badRequest('Paste or upload at least one customer.');
+  if (rows.length > 3000) throw badRequest('Import at most 3,000 customers at a time.');
+  const defaults: string[] = Array.isArray(b.defaultCategories) ? b.defaultCategories.map(String) : [];
+  const dryRun = b.dryRun !== false;
+  const cleanCats = (v: unknown): string[] => {
+    const list = (Array.isArray(v) ? v : String(v ?? '').split(/[,;/|]+/)).map(x => String(x).trim()).filter(Boolean);
+    return list.map(x => CATEGORY_CODES.find(c => c.toLowerCase() === x.toLowerCase()) ?? `?${x}`);
+  };
+  return withCtx(req.ctx, async tx => {
+    const existing = await tx.query<{ id: string; code: string; name: string; categories: string[] }>('SELECT id, code, name, categories FROM tenants');
+    const byCode = new Map(existing.map(t => [t.code, t]));
+    const byName = new Map(existing.map(t => [t.name.trim().toLowerCase(), t]));
+    const usedCodes = new Set(existing.map(t => t.code));
+    const results: { row: number; name: string; code: string; action: 'create' | 'update' | 'unchanged' | 'error'; categories: string[]; message?: string }[] = [];
+    const seenNames = new Set<string>();
+    for (const [i, r] of rows.entries()) {
+      const row = i + 1;
+      const name = String(r.name ?? '').trim().replace(/\s+/g, ' ');
+      if (!name) { results.push({ row, name: '', code: '', action: 'error', categories: [], message: 'Customer name is empty' }); continue; }
+      if (name.length > 120) { results.push({ row, name: name.slice(0, 40) + '…', code: '', action: 'error', categories: [], message: 'Name is longer than 120 characters' }); continue; }
+      const key = name.toLowerCase();
+      if (seenNames.has(key)) { results.push({ row, name, code: '', action: 'error', categories: [], message: 'Listed twice in this import' }); continue; }
+      seenNames.add(key);
+      const cats = [...new Set([...cleanCats(r.categories), ...defaults])];
+      const bad = cats.find(c => c.startsWith('?') || !CATEGORY_CODES.includes(c));
+      if (bad) { results.push({ row, name, code: '', action: 'error', categories: [], message: `Unknown category ${bad.replace(/^\?/, '')}` }); continue; }
+      if (!cats.length) { results.push({ row, name, code: '', action: 'error', categories: [], message: 'No category: add a Categories column or tick a default category' }); continue; }
+      let code = String(r.code ?? '').trim().toLowerCase();
+      if (code && !/^[a-z0-9][a-z0-9_-]*$/.test(code)) { results.push({ row, name, code, action: 'error', categories: cats, message: 'Code may use only lowercase letters, numbers, - and _' }); continue; }
+      const match = (code && byCode.get(code)) || byName.get(key);
+      if (match) {
+        const merged = [...new Set([...match.categories, ...cats])];
+        const added = merged.filter(c => !match.categories.includes(c));
+        if (!added.length) { results.push({ row, name: match.name, code: match.code, action: 'unchanged', categories: merged, message: 'Already exists with these categories' }); continue; }
+        if (!dryRun) await tx.query('UPDATE tenants SET categories = $2 WHERE id = $1', [match.id, merged]);
+        match.categories = merged;
+        results.push({ row, name: match.name, code: match.code, action: 'update', categories: merged, message: `Adds ${added.join(', ')}` });
+        continue;
+      }
+      if (!code) { const base = slugify(name); code = base; for (let n = 2; usedCodes.has(code); n++) code = `${base.slice(0, 36)}-${n}`; }
+      else if (usedCodes.has(code)) { results.push({ row, name, code, action: 'error', categories: cats, message: 'Code already used by another customer' }); continue; }
+      usedCodes.add(code);
+      const siemRaw = String(r.siem ?? '').trim();
+      const siem = SIEMS.find(s => s.toLowerCase() === siemRaw.toLowerCase()) ?? (cats.includes('TSAM') ? 'QRadar' : cats.includes('TMDR') ? 'Antarex' : 'None');
+      const service = String(r.service ?? '').trim().slice(0, 80) || cats.join(' + ');
+      const rd = String(r.renewalDate ?? '').trim();
+      const rdDate = new Date(rd + 'T00:00:00Z');
+      const renewal = /^\d{4}-\d{2}-\d{2}$/.test(rd) && !isNaN(+rdDate) && rdDate.toISOString().slice(0, 10) === rd ? rd : null;
+      if (!dryRun) {
+        const [t] = await tx.query('INSERT INTO tenants (code, name, service, siem, categories, renewal_date) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', [code, name, service, siem, cats, renewal]);
+        if (siem !== 'None') await tx.query(`INSERT INTO integrations (id, kind, name, tenant_id, auth_label, settings) VALUES ($1, 'dashboard', $2, $3, 'Service account token (Viewer)', '{"panels":{}}') ON CONFLICT (id) DO NOTHING`, [`grafana:${code}`, `Grafana · ${name}`, t.id]);
+      }
+      results.push({ row, name, code, action: 'create', categories: cats });
+    }
+    const count = (a: string) => results.filter(x => x.action === a).length;
+    const summary = { create: count('create'), update: count('update'), unchanged: count('unchanged'), error: count('error') };
+    if (!dryRun) await audit(tx, req.actor, 'Imported customers', `${summary.create} created, ${summary.update} updated, ${summary.unchanged} unchanged, ${summary.error} skipped`, null);
+    return { dryRun, summary, results };
+  });
+});
 route('PUT', '/api/admin/tenants/:id', (req) => { if (!UUID.test(req.params.id)) throw notFound(); return saveTenant(req, req.params.id); });
 
 route('PUT', '/api/admin/sla', async (req) => {
