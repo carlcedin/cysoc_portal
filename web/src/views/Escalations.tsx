@@ -66,14 +66,13 @@ export function Escalations({ meta, scope, setScope, can }: ViewProps) {
     <section className="panel">
       <div className="filters"><h3>Escalation register</h3><Chips idPrefix="chip" value={filter} options={chipDefs} onChange={v => { setFilter(v); setOpenId(null); }} /></div>
       <Table head={<><th>Ref</th>{multi && <th>Tenant</th>}<th>Severity</th><th>Summary</th><th>Status</th><th>Escalated</th><th>Customer ack</th><th>Ack SLA</th></>}>
-        {rows.length ? rows.slice(0, 300).map(e => { const a = ackState(e); return <React.Fragment key={e.id}>
+        {rows.length ? rows.map(e => { const a = ackState(e); return <React.Fragment key={e.id}>
           <tr className="click" tabIndex={0} data-ref={e.ref} onClick={() => setOpenId(openId === e.id ? null : e.id)} onKeyDown={k => k.key === 'Enter' && setOpenId(openId === e.id ? null : e.id)}>
             <td className="mono">{e.ref}</td>{multi && <td>{e.tenant_name}</td>}<td><Sev s={e.severity} /></td><td className="wrap-t">{e.summary}</td>
             <td><Pill c={PILL[e.status]}>{LABEL[e.status]}</Pill></td><td className="mono">{fmt(e.escalated_at)}</td><td className="mono">{fmt(e.acknowledged_at)}</td><td className={a.cls}>{a.txt}</td></tr>
           {openId === e.id && <tr className="editrow"><td colSpan={8}><Detail id={e.id} staff={staff} can={can} onChange={reload} /></td></tr>}
         </React.Fragment>; }) : <tr><td colSpan={8} className="note">No escalations match this filter.</td></tr>}
       </Table>
-      {rows.length > 300 && <p className="note">Showing the first 300. Narrow the filter or choose a tenant to see more.</p>}
     </section>
   </>;
 }

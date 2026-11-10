@@ -1,6 +1,6 @@
 {
   "name": "cysoc-portal",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "description": "CySOC multi-tenant customer portal: escalations, dashboards, SLA scorecard, requests, reports, contacts, audit and administration.",
   "type": "module",

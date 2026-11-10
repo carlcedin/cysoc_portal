@@ -36,8 +36,44 @@ export const Panel = ({ title, src, cls = '', children, right }: { title: string
   <section className={'panel ' + cls}><div className="ph"><h3>{title}</h3>{right ?? (src && <span className="src">{src}</span>)}</div>{children}</section>;
 export const Pill = ({ c, children }: { c: string; children: React.ReactNode }) => <span className={'pill ' + c}>{children}</span>;
 export const Sev = ({ s }: { s: string }) => <span className={'sev ' + s}>{s}</span>;
-export const Table = ({ head, children }: { head: React.ReactNode; children: React.ReactNode }) =>
-  <div className="tbl"><table><thead><tr>{head}</tr></thead><tbody>{children}</tbody></table></div>;
+/** Every table pages itself: 10 rows by default, with a choice of page size. pageSize={0} turns paging off. */
+export function Table({ head, children, pageSize = 10 }: { head: React.ReactNode; children: React.ReactNode; pageSize?: number }) {
+  const rows = React.Children.toArray(children);
+  const total = rows.length;
+  const [size, setSize] = useState(pageSize);
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [total]);
+  const paged = size > 0 && total > pageSize;
+  const pages = paged ? Math.ceil(total / size) : 1;
+  const p = Math.min(page, pages);
+  const shown = paged ? rows.slice((p - 1) * size, p * size) : rows;
+  return <>
+    <div className="tbl"><table><thead><tr>{head}</tr></thead><tbody>{shown}</tbody></table></div>
+    {paged && <Pager page={p} pages={pages} total={total} size={size} setPage={setPage} setSize={(n) => { setSize(n); setPage(1); }} />}
+  </>;
+}
+
+function Pager({ page, pages, total, size, setPage, setSize }: { page: number; pages: number; total: number; size: number; setPage: (n: number) => void; setSize: (n: number) => void }) {
+  // First, last, and the pages around the current one, with gaps shown as …
+  const nums: (number | '…')[] = [];
+  for (let n = 1; n <= pages; n++) {
+    if (n === 1 || n === pages || Math.abs(n - page) <= 1) nums.push(n);
+    else if (nums[nums.length - 1] !== '…') nums.push('…');
+  }
+  const from = (page - 1) * size + 1, to = Math.min(total, page * size);
+  return <nav className="pager" aria-label="Pages">
+    <span className="note">Showing {from}–{to} of {total.toLocaleString()}</span>
+    <span className="pager-pages">
+      <button className="chip" aria-label="Previous page" disabled={page <= 1} onClick={() => setPage(page - 1)}>‹ Prev</button>
+      {nums.map((n, i) => n === '…' ? <span key={'g' + i} className="note">…</span>
+        : <button key={n} className="chip" aria-label={`Page ${n}`} aria-pressed={n === page} aria-current={n === page ? 'page' : undefined} onClick={() => setPage(n)}>{n}</button>)}
+      <button className="chip" aria-label="Next page" disabled={page >= pages} onClick={() => setPage(page + 1)}>Next ›</button>
+    </span>
+    <label className="note pager-size">Rows per page{' '}
+      <select aria-label="Rows per page" value={size} onChange={e => setSize(Number(e.target.value))}>{[10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}</select>
+    </label>
+  </nav>;
+}
 export const Loading = () => <div className="loading">Loading…</div>;
 export const ErrorBox = ({ msg }: { msg: string }) => <div className="err-box" role="alert"><div>{msg}</div></div>;
 export const Msg = ({ m }: { m: { text: string; err?: boolean } | null }) => m ? <div className={'toast' + (m.err ? ' err' : '')} role="status">{m.text}</div> : null;

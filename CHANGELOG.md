@@ -1,5 +1,8 @@
 # Changes
 
+## 1.2.1
+- Every table with more than 10 rows is split into pages: 10 rows by default, with Previous/Next, page numbers and a choice of 25, 50 or 100 rows per page. Changing a filter returns to page 1.
+
 ## 1.2.0
 - Bulk customer import under Administration > Tenants > Import customers: paste rows copied from Excel or choose a CSV file, tick the categories every row gets, check the preview, then import. Existing customers (matched by code or name) gain the new categories instead of being duplicated; bad rows are skipped and listed. Up to 3,000 rows at a time.
 - Customers can have no SIEM (for example DDoS only). They get no Grafana connection, are left out of the combined security dashboard, and their workspace explains there is no SIEM dashboard.

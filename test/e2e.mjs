@@ -103,6 +103,19 @@ const ctx = (vp = { width: 1280, height: 900 }) => browser.newContext({ viewport
   await p.click('#tab-escalations'); await p.click('#chip-triage'); await p.waitForTimeout(300);
   const row = await p.$('tr[data-ref]');
   if (row) { await row.click(); await p.waitForSelector('#b-esc'); await p.click('#b-esc'); await p.waitForTimeout(800); check('analyst escalated a triage item', /Escalated/.test(await p.textContent('.view'))); }
+  // Paging: long lists show 10 rows with page controls
+  await p.click('#tab-escalations'); await p.click('#chip-all'); await p.waitForTimeout(500);
+  const firstPage = await p.$$eval('tr[data-ref]', r => r.map(x => x.getAttribute('data-ref')));
+  const showing = await p.textContent('.pager .note');
+  check('long lists show 10 rows per page', firstPage.length === 10 && /Showing 1–10 of/.test(showing), showing);
+  await p.click('.pager [aria-label="Next page"]'); await p.waitForTimeout(200);
+  const second = await p.$$eval('tr[data-ref]', r => r.map(x => x.getAttribute('data-ref')));
+  check('next page shows the next 10', second.length === 10 && second[0] !== firstPage[0] && /Showing 11–20/.test(await p.textContent('.pager .note')));
+  await p.selectOption('.pager select', '50'); await p.waitForTimeout(200);
+  check('rows per page can be changed', (await p.$$eval('tr[data-ref]', r => r.length)) === 50);
+  await p.click('#chip-open'); await p.waitForTimeout(300);
+  check('changing the filter returns to page 1', /Showing 1–/.test((await p.textContent('.pager .note').catch(() => 'Showing 1–'))));
+  await p.screenshot({ path: `${SHOTS}/paging.png`, fullPage: true });
   // Category -> customer -> workspace
   await p.click('#tab-customers'); await p.waitForSelector('#catSel');
   await p.selectOption('#catSel', 'DDoS'); await p.waitForTimeout(500);

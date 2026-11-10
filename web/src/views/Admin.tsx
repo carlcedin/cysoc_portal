@@ -169,7 +169,7 @@ function Permissions() {
   const { data } = useApi<any>('/api/admin/integrations');
   if (!data) return null;
   return <Panel title="Permissions by account type">
-    <Table head={<><th>Capability</th><th>Full Admin</th><th>Analyst</th><th>Customer</th></>}>
+    <Table pageSize={0} head={<><th>Capability</th><th>Full Admin</th><th>Analyst</th><th>Customer</th></>}>
       {data.permissions.map((p: any) => <tr key={p.capability}><td><b>{p.capability}</b></td><td>{permCell(p.admin)}</td><td>{permCell(p.analyst)}</td><td>{permCell(p.customer)}</td></tr>)}
     </Table>
   </Panel>;
@@ -224,11 +224,10 @@ function ImportCustomers({ meta, onDone, onClose }: { meta: ViewProps['meta']; o
         {done && <b>Saved.</b>}
       </div>
       <Table head={<><th className="num">Row</th><th>Customer</th><th>Code</th><th>Categories</th><th>Result</th><th>Note</th></>}>
-        {[...result.results].sort((a: any, b: any) => (a.action === 'error' ? 0 : 1) - (b.action === 'error' ? 0 : 1) || a.row - b.row).slice(0, 300).map((r: any) => <tr key={r.row}>
+        {[...result.results].sort((a: any, b: any) => (a.action === 'error' ? 0 : 1) - (b.action === 'error' ? 0 : 1) || a.row - b.row).map((r: any) => <tr key={r.row}>
           <td className="num">{r.row}</td><td>{r.name}</td><td className="mono">{r.code}</td><td><CatPills cats={r.categories} /></td>
           <td><Pill c={ACT[r.action][0]}>{ACT[r.action][1]}</Pill></td><td className="wrap-t">{r.message ?? ''}</td></tr>)}
       </Table>
-      {result.results.length > 300 && <p className="note">Showing 300 of {result.results.length} rows, skipped rows first.</p>}
     </>}
   </div>;
 }
